@@ -47,11 +47,41 @@ def save_config(config):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
-def get_audio_devices():
-    """Get list of audio input devices using ffmpeg"""
+def get_audio_devices_wmi():
+    """Get audio devices using WMI (Windows only) - more reliable"""
     devices = []
     try:
-        # Run ffmpeg to list devices
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+
+        # Use PowerShell to get audio input devices
+        ps_command = '''
+        Get-WmiObject Win32_PnPEntity | Where-Object { $_.Name -like '*Microphone*' -or $_.Name -like '*Audio*Input*' -or $_.Name -like '*Recording*' } | Select-Object -ExpandProperty Name
+        '''
+        result = subprocess.run(
+            ['powershell', '-Command', ps_command],
+            capture_output=True,
+            text=True,
+            startupinfo=startupinfo,
+            encoding='utf-8',
+            errors='replace'
+        )
+
+        for line in result.stdout.strip().split('\n'):
+            line = line.strip()
+            if line and len(line) > 2:
+                devices.append(line)
+
+    except Exception as e:
+        pass
+
+    return devices
+
+def get_audio_devices_ffmpeg():
+    """Get audio devices using ffmpeg"""
+    devices = []
+    try:
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = subprocess.SW_HIDE
@@ -66,7 +96,7 @@ def get_audio_devices():
         )
         output = result.stderr
 
-        # Debug: save output to file for troubleshooting
+        # Debug: save output to file
         try:
             with open(os.path.join(BASE_DIR, "devices_debug.txt"), 'w', encoding='utf-8') as f:
                 f.write(output)
@@ -75,35 +105,38 @@ def get_audio_devices():
 
         in_audio_section = False
         for line in output.split('\n'):
-            # Check for audio devices section (various ffmpeg versions)
             if 'audio devices' in line.lower() or 'DirectShow audio' in line:
                 in_audio_section = True
                 continue
 
-            # Stop at video devices section
             if in_audio_section and ('video devices' in line.lower() or 'DirectShow video' in line):
                 break
 
-            if in_audio_section:
-                # Look for device names in quotes - handle various formats
-                # Format 1: [dshow @ ...] "Device Name"
-                # Format 2: [dshow @ ...]  "Device Name" (audio)
-                if '"' in line:
-                    start = line.find('"') + 1
-                    end = line.find('"', start)
-                    if start > 0 and end > start:
-                        device_name = line[start:end]
-                        # Skip alternative names (start with @) and empty names
-                        if device_name and not device_name.startswith('@') and len(device_name) > 1:
-                            devices.append(device_name)
+            if in_audio_section and '"' in line:
+                start = line.find('"') + 1
+                end = line.find('"', start)
+                if start > 0 and end > start:
+                    device_name = line[start:end]
+                    if device_name and not device_name.startswith('@') and len(device_name) > 1:
+                        devices.append(device_name)
 
     except Exception as e:
-        # Save error for debugging
         try:
             with open(os.path.join(BASE_DIR, "error_debug.txt"), 'w', encoding='utf-8') as f:
                 f.write(f"Error: {str(e)}\nFFmpeg path: {FFMPEG_PATH}\nExists: {os.path.exists(FFMPEG_PATH)}")
         except:
             pass
+
+    return devices
+
+def get_audio_devices():
+    """Get list of audio input devices - try multiple methods"""
+    # First try ffmpeg
+    devices = get_audio_devices_ffmpeg()
+
+    # If ffmpeg returns nothing, try WMI
+    if not devices and sys.platform == 'win32':
+        devices = get_audio_devices_wmi()
 
     return devices
 
