@@ -157,6 +157,9 @@ class IcecastStreamer:
         self.setup_ui()
         self.refresh_devices()
 
+        # Handle window close - stop stream before closing
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
     def setup_ui(self):
         # Main frame with padding
         main_frame = ttk.Frame(self.root, padding="15")
@@ -397,6 +400,23 @@ class IcecastStreamer:
         self.start_btn.config(state='normal')
         self.stop_btn.config(state='disabled')
         messagebox.showinfo("שידור", "השידור הופסק")
+
+    def on_closing(self):
+        """Called when window is closed - stop stream and exit"""
+        if self.process:
+            try:
+                if sys.platform == 'win32':
+                    subprocess.run(
+                        ['taskkill', '/F', '/T', '/PID', str(self.process.pid)],
+                        capture_output=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                else:
+                    self.process.kill()
+            except:
+                pass
+            self.process = None
+        self.root.destroy()
 
     def run(self):
         self.root.mainloop()
