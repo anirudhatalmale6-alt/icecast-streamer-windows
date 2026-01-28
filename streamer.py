@@ -344,7 +344,18 @@ class IcecastStreamer:
 
     def stop_stream(self):
         if self.process:
-            self.process.terminate()
+            try:
+                # On Windows, use taskkill to force kill ffmpeg
+                if sys.platform == 'win32':
+                    subprocess.run(
+                        ['taskkill', '/F', '/T', '/PID', str(self.process.pid)],
+                        capture_output=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                else:
+                    self.process.kill()
+            except:
+                pass
             self.process = None
 
         self.is_streaming = False
