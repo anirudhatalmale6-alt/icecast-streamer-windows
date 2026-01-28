@@ -292,12 +292,27 @@ class IcecastStreamer:
         ]
 
         try:
+            # Debug: save command to file
+            try:
+                with open(os.path.join(BASE_DIR, "command_debug.txt"), 'w', encoding='utf-8') as f:
+                    f.write(" ".join(ffmpeg_command))
+            except:
+                pass
+
             # Start ffmpeg in background
+            startupinfo = None
+            if sys.platform == 'win32':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+
             self.process = subprocess.Popen(
                 ffmpeg_command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                startupinfo=startupinfo,
+                encoding='utf-8',
+                errors='replace'
             )
 
             self.is_streaming = True
