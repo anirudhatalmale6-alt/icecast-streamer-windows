@@ -51,33 +51,59 @@ def get_audio_devices():
     """Get list of audio input devices using ffmpeg"""
     devices = []
     try:
+        # Run ffmpeg to list devices
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+
         result = subprocess.run(
             [FFMPEG_PATH, "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
             capture_output=True,
             text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            startupinfo=startupinfo if sys.platform == 'win32' else None,
+            encoding='utf-8',
+            errors='replace'
         )
         output = result.stderr
 
+        # Debug: save output to file for troubleshooting
+        try:
+            with open(os.path.join(BASE_DIR, "devices_debug.txt"), 'w', encoding='utf-8') as f:
+                f.write(output)
+        except:
+            pass
+
         in_audio_section = False
         for line in output.split('\n'):
-            if 'DirectShow audio devices' in line:
+            # Check for audio devices section (various ffmpeg versions)
+            if 'audio devices' in line.lower() or 'DirectShow audio' in line:
                 in_audio_section = True
                 continue
+
+            # Stop at video devices section
+            if in_audio_section and ('video devices' in line.lower() or 'DirectShow video' in line):
+                break
+
             if in_audio_section:
-                if 'DirectShow video devices' in line or line.strip() == '':
-                    if 'video' in line.lower():
-                        break
-                if ']  "' in line:
-                    # Extract device name between quotes
+                # Look for device names in quotes - handle various formats
+                # Format 1: [dshow @ ...] "Device Name"
+                # Format 2: [dshow @ ...]  "Device Name" (audio)
+                if '"' in line:
                     start = line.find('"') + 1
-                    end = line.rfind('"')
+                    end = line.find('"', start)
                     if start > 0 and end > start:
                         device_name = line[start:end]
-                        if device_name and not device_name.startswith('@'):
+                        # Skip alternative names (start with @) and empty names
+                        if device_name and not device_name.startswith('@') and len(device_name) > 1:
                             devices.append(device_name)
+
     except Exception as e:
-        print(f"Error getting devices: {e}")
+        # Save error for debugging
+        try:
+            with open(os.path.join(BASE_DIR, "error_debug.txt"), 'w', encoding='utf-8') as f:
+                f.write(f"Error: {str(e)}\nFFmpeg path: {FFMPEG_PATH}\nExists: {os.path.exists(FFMPEG_PATH)}")
+        except:
+            pass
 
     return devices
 
@@ -112,11 +138,16 @@ class IcecastStreamer:
         device_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.device_var = tk.StringVar(value=self.config.get('audio_device', ''))
-        self.device_combo = ttk.Combobox(device_frame, textvariable=self.device_var, width=45, state='readonly')
+        # Changed to normal state so user can type device name manually
+        self.device_combo = ttk.Combobox(device_frame, textvariable=self.device_var, width=40)
         self.device_combo.pack(side=tk.LEFT, padx=(0, 5))
 
         refresh_btn = ttk.Button(device_frame, text="🔄", width=3, command=self.refresh_devices)
         refresh_btn.pack(side=tk.LEFT)
+
+        # Manual entry hint
+        device_hint = ttk.Label(main_frame, text="(אם הרשימה ריקה - הקלד ידנית את שם ההתקן)", foreground='gray', font=('Arial', 8))
+        device_hint.pack(anchor='e')
 
         # Server settings
         server_frame = ttk.LabelFrame(main_frame, text="הגדרות שרת", padding="10")
